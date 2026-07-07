@@ -7,14 +7,22 @@ services:
     restart: unless-stopped
     profiles:
       - bridge
-    ports:
-      - "5173:5173"
     volumes:
       - ../frontend:/app
       - /app/node_modules
-    command: sh -lc "npm install --include=optional && npm run dev -- --host 0.0.0.0"
     environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+      # Read by the BROWSER (fetch calls), so this can never be a container
+      # name — container names only resolve between containers on
+      # rydberg-net, not from your Mac/phone's browser.
+      #
+      # Production (behind Cloudflare Tunnel path-routing): use a relative
+      # path, e.g. VITE_API_BASE_URL=/api — same origin as the frontend,
+      # no hostname needed at all.
+      #
+      # Local dev without Cloudflare: only works if you've ALSO added a
+      # host port mapping to backend-bridge (e.g. ports: ["8081:8080"]),
+      # then point this at http://localhost:8081 to match.
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
       CHOKIDAR_USEPOLLING: "true"
     depends_on:
       - backend-bridge

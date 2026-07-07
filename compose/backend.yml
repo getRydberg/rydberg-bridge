@@ -7,15 +7,38 @@ services:
     restart: unless-stopped
     profiles:
       - bridge
-    ports:
-      - "8080:8080"
+
+    # This module needs broader host access than any other Rydberg module —
+    # its entire job is reporting on the host and other containers, not
+    # running an isolated app. See README.md for the reasoning per mount.
     volumes:
-      - ../backend:/app
+      # Talk to the HOST's Docker daemon (list all containers, not just this one).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Host resource stats — read-only.
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      # tmux/screen sockets live here — the `user:` field below must match
+      # your host UID exactly, or these sockets are unreadable (permission
+      # denied — fails silently as an empty session list, not an error).
+      - /tmp:/tmp
+      # So Bridge can read modules.list from the core repo.
+      - ${RYDBERG_ROOT:-~/Rydberg}:/rydberg-root:ro
+
+    # Match your host user's UID/GID so tmux/screen sockets are readable.
+    # Check yours with `id -u` and `id -g` — change if not 1000:1000.
+    user: "1000:1000"
+
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "44"   # video — verify with `getent group video` on THIS server
+      - "993"  # render — verify with `getent group render` on THIS server
+
     environment:
-      COOKIE_SECURE: ${COOKIE_SECURE}
-      FRONTEND_URL: ${FRONTEND_URL}
-    depends_on:
-      - postgres-dashboard
+      RYDBERG_ROOT: /rydberg-root
+      HOST_PROC: /host/proc
+      HOST_SYS: /host/sys
+
     networks:
       - rydberg-net
 

@@ -1,3 +1,13 @@
+# Rydberg Bridge — root compose entry point.
+#
+# This file does almost nothing itself: it just includes the per-service
+# compose files under ./compose. Run everything from the repo root:
+#
+#   docker compose --profile bridge up -d
+#   docker compose ps
+#   docker compose down
+#
+# Each service lives in its own file under compose/ for easier editing.
 include:
-  - compose/frontend.yml
   - compose/backend.yml
+  - compose/frontend.yml
