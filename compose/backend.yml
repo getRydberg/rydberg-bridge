@@ -21,12 +21,12 @@ services:
       # your host UID exactly, or these sockets are unreadable (permission
       # denied — fails silently as an empty session list, not an error).
       - /tmp:/tmp
+      - /run/screen:/run/screen:ro
       # So Bridge can read modules.list from the core repo.
       - ${RYDBERG_ROOT:-~/Rydberg}:/rydberg-root:ro
 
-    # Match your host user's UID/GID so tmux/screen sockets are readable.
-    # Check yours with `id -u` and `id -g` — change if not 1000:1000.
-    user: "1000:1000"
+    # Root is required here to reliably access the mounted Docker socket
+    # and host telemetry interfaces in heterogeneous host setups.
 
     devices:
       - /dev/dri:/dev/dri

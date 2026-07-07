@@ -21,6 +21,16 @@ type BridgeResources = {
   memory?: BridgeMemory;
   disk_raw?: string;
   gpu_raw?: string;
+  cpu?: { avg_percent: number; per_core: number[] };
+  disks?: { mount: string; used_gb: number; total_gb: number; pct: number }[];
+  gpus?: {
+    slot: string;
+    name: string;
+    util: number;
+    vram_used_gb: number;
+    vram_total_gb: number;
+    temp_c: number;
+  }[];
 };
 type BridgeStatus = {
   modules: BridgeModule[];
@@ -160,15 +170,22 @@ const DISKS = [
 const BASE_CPU_CORES = [34, 12, 67, 45, 23, 89, 56, 31];
 
 const envApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "";
-const preferProxyPath =
-  typeof window !== "undefined" &&
-  envApiBaseUrl.includes("localhost") &&
-  window.location.hostname !== "localhost";
-const API_BASE_URL = preferProxyPath ? "/api" : (envApiBaseUrl || "/api");
+const pointsToLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(envApiBaseUrl);
+const API_BASE_URL = !envApiBaseUrl || pointsToLocalhost ? "/api" : envApiBaseUrl;
 
 function apiUrl(path: string) {
   const base = API_BASE_URL.endsWith("/") ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
   return `${base}${path}`;
+}
+
+async function fetchWithTimeout(url: string, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
 }
 
 function parseTmuxName(raw: string) {
@@ -183,7 +200,7 @@ function parseScreenName(raw: string) {
 
 function toSessionItems(sessions: BridgeSessions | undefined): SessionItem[] {
   if (!sessions) {
-    return SESSIONS;
+    return [];
   }
 
   const mapped: SessionItem[] = [
@@ -192,12 +209,12 @@ function toSessionItems(sessions: BridgeSessions | undefined): SessionItem[] {
   ];
 
   const deduped = mapped.filter((session, idx) => mapped.findIndex((s) => s.name === session.name) === idx);
-  return deduped.length > 0 ? deduped : SESSIONS;
+  return deduped;
 }
 
 function toUiModules(modules: BridgeModule[] | undefined): UiModule[] {
   if (!modules || modules.length === 0) {
-    return MODULES;
+    return [];
   }
   return modules.map((mod) => ({
     name: mod.name,
@@ -208,7 +225,7 @@ function toUiModules(modules: BridgeModule[] | undefined): UiModule[] {
 
 function toUiContainers(containers: BridgeContainer[] | undefined): UiContainer[] {
   if (!containers || containers.length === 0) {
-    return CONTAINERS;
+    return [];
   }
   return containers.map((c) => {
     const status = c.status.toLowerCase().startsWith("up") ? "running" : "exited";
@@ -415,35 +432,16 @@ function ContainersSection({ containers }: { containers: UiContainer[] }) {
 
 function SessionsSection({
   sessions,
-  userCount,
   selectedSession,
   setSelectedSession,
 }: {
   sessions: SessionItem[];
-  userCount: number;
   selectedSession: string;
   setSelectedSession: (s: string) => void;
 }) {
   return (
     <section>
       <SectionHeader icon={<Users size={13} />} label="Sessions" />
-      <div className="flex items-center gap-2 mb-3">
-        <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
-          style={{
-            backgroundColor: "#4d9ef614",
-            border: "1px solid #4d9ef628",
-          }}
-        >
-          <Users size={12} style={{ color: "#4d9ef6" }} />
-          <span className="font-mono text-sm font-semibold" style={{ color: "#4d9ef6" }}>
-            {userCount}
-          </span>
-          <span className="font-mono text-xs" style={{ color: "#4e6278" }}>
-            users logged in
-          </span>
-        </div>
-      </div>
       <div className="flex flex-col gap-1.5">
         {sessions.map((s) => {
           const active = selectedSession === s.name;
@@ -675,34 +673,16 @@ function ScreenViewerSection({
   );
 }
 
-function ResourcesSection({ tick }: { tick: number }) {
-  const cpuValues = BASE_CPU_CORES.map(
-    (v, i) => Math.min(98, Math.max(2, v + Math.sin(tick * 0.3 + i * 0.9) * 9))
-  );
-  const cpuAvg = Math.round(cpuValues.reduce((a, b) => a + b, 0) / cpuValues.length);
+function ResourcesSection({ resources }: { resources: BridgeResources | undefined }) {
+  const cpuValues = resources?.cpu?.per_core ?? [];
+  const cpuAvg = Math.round(resources?.cpu?.avg_percent ?? 0);
 
-  const ramUsed = parseFloat((23.4 + Math.sin(tick * 0.11) * 0.4).toFixed(1));
-  const ramTotal = 64;
-  const ramPct = (ramUsed / ramTotal) * 100;
+  const ramUsed = ((resources?.memory?.used_mb ?? 0) / 1024);
+  const ramTotal = ((resources?.memory?.total_mb ?? 0) / 1024);
+  const ramPct = ramTotal > 0 ? (ramUsed / ramTotal) * 100 : 0;
 
-  const gpus = [
-    {
-      name: "RTX 4070",
-      slot: "GPU 0",
-      util: Math.round(lerp(44, 68, (Math.sin(tick * 0.2) + 1) / 2)),
-      vramUsed: parseFloat((7.2 + Math.sin(tick * 0.15) * 0.3).toFixed(1)),
-      vramTotal: 12,
-      temp: Math.round(lerp(61, 67, (Math.sin(tick * 0.13) + 1) / 2)),
-    },
-    {
-      name: "RTX 3060",
-      slot: "GPU 1",
-      util: Math.round(lerp(12, 28, (Math.sin(tick * 0.17 + 1.4) + 1) / 2)),
-      vramUsed: parseFloat((3.1 + Math.sin(tick * 0.09 + 0.7) * 0.2).toFixed(1)),
-      vramTotal: 12,
-      temp: Math.round(lerp(42, 47, (Math.sin(tick * 0.1 + 0.5) + 1) / 2)),
-    },
-  ];
+  const disks = resources?.disks ?? [];
+  const gpus = resources?.gpus ?? [];
 
   return (
     <section>
@@ -728,18 +708,26 @@ function ResourcesSection({ tick }: { tick: number }) {
             <span className="text-sm font-normal" style={{ color: "#4e6278" }}>%</span>
           </span>
         </div>
-        <CoreBars values={cpuValues} />
-        <div className="flex justify-between mt-1.5">
-          {cpuValues.map((v, i) => (
-            <span
-              key={i}
-              className="flex-1 text-center font-mono text-[9px]"
-              style={{ color: "#4e6278" }}
-            >
-              {Math.round(v)}
-            </span>
-          ))}
-        </div>
+        {cpuValues.length > 0 ? (
+          <>
+            <CoreBars values={cpuValues} />
+            <div className="flex justify-between mt-1.5">
+              {cpuValues.map((v, i) => (
+                <span
+                  key={i}
+                  className="flex-1 text-center font-mono text-[9px]"
+                  style={{ color: "#4e6278" }}
+                >
+                  {Math.round(v)}
+                </span>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="font-mono text-[10px]" style={{ color: "#4e6278" }}>
+            CPU core details unavailable.
+          </div>
+        )}
       </div>
 
       {/* RAM */}
@@ -755,14 +743,14 @@ function ResourcesSection({ tick }: { tick: number }) {
             </span>
           </div>
           <span className="font-mono text-sm" style={{ color: "#d8e4f0" }}>
-            <span className="font-semibold">{ramUsed}</span>
+            <span className="font-semibold">{ramUsed.toFixed(1)}</span>
             <span style={{ color: "#4e6278" }}> / {ramTotal} GB</span>
           </span>
         </div>
         <ResourceBar pct={ramPct} />
         <div className="flex justify-between mt-1.5">
           <span className="font-mono text-[10px]" style={{ color: "#4e6278" }}>
-            {ramUsed} GB used
+            {ramUsed.toFixed(1)} GB used
           </span>
           <span className="font-mono text-[10px]" style={{ color: "#4e6278" }}>
             {(ramTotal - ramUsed).toFixed(1)} GB free
@@ -775,8 +763,8 @@ function ResourcesSection({ tick }: { tick: number }) {
         className="rounded-lg overflow-hidden mb-3"
         style={{ border: "1px solid #182030" }}
       >
-        {DISKS.map((disk, i) => {
-          const pct = (disk.used / disk.total) * 100;
+        {disks.map((disk, i) => {
+          const pct = disk.pct;
           return (
             <div
               key={disk.mount}
@@ -794,13 +782,18 @@ function ResourcesSection({ tick }: { tick: number }) {
                   </span>
                 </div>
                 <span className="font-mono text-xs" style={{ color: "#4e6278" }}>
-                  {formatGB(disk.used)} / {formatGB(disk.total)}
+                  {formatGB(disk.used_gb)} / {formatGB(disk.total_gb)}
                 </span>
               </div>
               <ResourceBar pct={pct} warn={pct > 85} />
             </div>
           );
         })}
+        {disks.length === 0 && (
+          <div className="px-4 py-3 font-mono text-[10px]" style={{ color: "#4e6278", backgroundColor: "#0c1422" }}>
+            Disk details unavailable.
+          </div>
+        )}
       </div>
 
       {/* GPUs */}
@@ -833,7 +826,7 @@ function ResourcesSection({ tick }: { tick: number }) {
                     className="font-mono text-sm font-semibold tabular-nums"
                     style={{ color: gpu.util > 80 ? "#f5a623" : "#d8e4f0" }}
                   >
-                    {gpu.util}%
+                    {Math.round(gpu.util)}%
                   </span>
                 </div>
                 <ResourceBar pct={gpu.util} />
@@ -846,11 +839,11 @@ function ResourcesSection({ tick }: { tick: number }) {
                     VRAM
                   </span>
                   <span className="font-mono text-xs" style={{ color: "#d8e4f0" }}>
-                    {gpu.vramUsed}
-                    <span style={{ color: "#4e6278" }}>/{gpu.vramTotal}G</span>
+                    {gpu.vram_used_gb.toFixed(1)}
+                    <span style={{ color: "#4e6278" }}>/{gpu.vram_total_gb.toFixed(1)}G</span>
                   </span>
                 </div>
-                <ResourceBar pct={vramPct} />
+                <ResourceBar pct={(gpu.vram_used_gb / Math.max(gpu.vram_total_gb, 0.1)) * 100} />
               </div>
 
               {/* Temp */}
@@ -863,14 +856,22 @@ function ResourcesSection({ tick }: { tick: number }) {
                 </div>
                 <span
                   className="font-mono text-sm font-semibold tabular-nums"
-                  style={{ color: tempWarn ? "#f5a623" : "#d8e4f0" }}
+                  style={{ color: gpu.temp_c > 75 ? "#f5a623" : "#d8e4f0" }}
                 >
-                  {gpu.temp}°C
+                  {Math.round(gpu.temp_c)}°C
                 </span>
               </div>
             </div>
           );
         })}
+        {gpus.length === 0 && (
+          <div
+            className="rounded-lg p-3 flex items-center"
+            style={{ backgroundColor: "#0c1422", border: "1px solid #182030", color: "#4e6278" }}
+          >
+            <span className="font-mono text-[10px]">No GPU telemetry detected.</span>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -879,29 +880,23 @@ function ResourcesSection({ tick }: { tick: number }) {
 // ─── App ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [selectedSession, setSelectedSession] = useState(SESSIONS[0].name);
+  const [selectedSession, setSelectedSession] = useState("");
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [lastUpdated, setLastUpdated] = useState("waiting for backend");
-  const [captureLines, setCaptureLines] = useState<string[]>(SCREEN_CONTENT[SESSIONS[0].name] ?? []);
+  const [captureLines, setCaptureLines] = useState<string[]>([]);
   const [captureLoading, setCaptureLoading] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
 
   const sessions = toSessionItems(status?.sessions);
   const modules = toUiModules(status?.modules);
   const containers = toUiContainers(status?.containers);
 
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 2000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
     let mounted = true;
 
     const loadStatus = async () => {
       try {
-        const response = await fetch(apiUrl("/status"));
+        const response = await fetchWithTimeout(apiUrl("/status"), 5000);
         if (!response.ok) {
           throw new Error(`status request failed (${response.status})`);
         }
@@ -916,6 +911,7 @@ export default function App() {
           return;
         }
         setLastUpdated("backend unavailable");
+        setStatus(null);
       }
     };
 
@@ -945,7 +941,7 @@ export default function App() {
     setCaptureError(null);
 
     const params = new URLSearchParams({ session: session.name, kind: session.type });
-    fetch(`${apiUrl("/capture")}?${params.toString()}`)
+    fetchWithTimeout(`${apiUrl("/capture")}?${params.toString()}`, 5000)
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`capture request failed (${response.status})`);
@@ -1037,7 +1033,6 @@ export default function App() {
         <ContainersSection containers={containers} />
         <SessionsSection
           sessions={sessions}
-          userCount={status?.sessions.users.length ?? 0}
           selectedSession={selectedSession}
           setSelectedSession={setSelectedSession}
         />
@@ -1049,7 +1044,7 @@ export default function App() {
           selectedSession={selectedSession}
           setSelectedSession={setSelectedSession}
         />
-        <ResourcesSection tick={tick} />
+        <ResourcesSection resources={status?.resources} />
       </main>
 
       {/* Observe-only footer */}
