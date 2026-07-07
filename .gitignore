@@ -1,0 +1,23 @@
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# node
+node_modules/
+dist/
+.vite/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# os / editor
+.DS_Store
+.vscode/
+.idea/
+
+# logs
+*.log

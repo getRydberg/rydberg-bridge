@@ -1,0 +1,24 @@
+services:
+  backend-bridge:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: rydberg-backend-bridge
+    restart: unless-stopped
+    profiles:
+      - bridge
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../backend:/app
+    environment:
+      COOKIE_SECURE: ${COOKIE_SECURE}
+      FRONTEND_URL: ${FRONTEND_URL}
+    depends_on:
+      - postgres-dashboard
+    networks:
+      - rydberg-net
+
+networks:
+  rydberg-net:
+    external: true
