@@ -31,6 +31,10 @@ export default defineConfig({
     },
   },
   server: {
+    // Vite 6 blocks requests with unrecognized Host headers by default.
+    // Traffic arrives via the Cloudflare Tunnel (Host: bridge.rydberg.app)
+    // and from other containers on rydberg-net (Host: rydberg-frontend-bridge).
+    allowedHosts: ['bridge.rydberg.app', 'rydberg-frontend-bridge'],
     proxy: {
       "/api": {
         target: process.env.VITE_API_PROXY_TARGET || "http://backend-bridge:8080",
