@@ -47,6 +47,9 @@ services:
     networks:
       - rydberg-net
 
+    cap_add:
+    - PERFMON   # required for intel_gpu_top to read GPU counters via perf_event_open()
+
 networks:
   rydberg-net:
     external: true

@@ -5,7 +5,7 @@ live Docker containers (what's actually running) so Bridge can report
 per-module state without knowing anything about module internals.
 """
 
-from .config import RYDBERG_ROOT
+from .config import CORE_INFRA_CONTAINERS, RYDBERG_ROOT
 from .docker_client import get_all_containers
 
 
@@ -48,10 +48,16 @@ def get_rydberg_modules():
 
 
 def get_unassigned_containers():
-    """Containers not backing any registered module — core infra
-    (traefik, cloudflared) plus anything stray or unexpected. Everything
-    module-owned is already shown in the Modules panel, so listing it
-    again here is just noise."""
+    """Containers not backing any registered module and not core infra
+    (traefik, cloudflared) — anything left over is stray or unexpected.
+    Everything module-owned is already shown in the Modules panel, and
+    core infra is expected to always be there, so listing either again
+    here is just noise."""
     containers = get_all_containers()
     module_names = _registered_module_names()
-    return [c for c in containers if not any(_matches_module(c["name"], name) for name in module_names)]
+    return [
+        c
+        for c in containers
+        if c["name"] not in CORE_INFRA_CONTAINERS
+        and not any(_matches_module(c["name"], name) for name in module_names)
+    ]

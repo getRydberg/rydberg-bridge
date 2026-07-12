@@ -2,6 +2,7 @@
 Intel xpu-smi and NVIDIA nvidia-smi paths, whichever's present)."""
 
 import json
+import re
 import shutil
 import time
 from pathlib import Path
@@ -179,18 +180,21 @@ def get_nvidia_gpus():
 def _list_intel_cards():
     """Discover DRM card selectors via `intel_gpu_top -L`, so each GPU gets
     queried individually instead of only ever seeing the first one.
-    Format varies a bit by intel-gpu-tools version — this parses
-    defensively and just returns [] if nothing recognizable comes back,
-    in which case get_intel_gpus() falls back to a single default query."""
+
+    Real output is 3-column (card name, human-readable GPU name, pci:
+    selector) with tree-branch lines for render nodes underneath — pull
+    just the pci:... token via regex rather than assuming column
+    position, since the device name itself contains spaces and breaks
+    naive split-based parsing."""
     out = run(["intel_gpu_top", "-L"], timeout=5)
     if out.startswith("ERROR"):
         return []
 
     cards = []
     for line in out.strip().splitlines():
-        parts = line.strip().split(None, 1)
-        if len(parts) == 2 and parts[0].lower().startswith("card"):
-            cards.append(parts[1])
+        match = re.search(r"pci:\S+", line)
+        if match:
+            cards.append(match.group(0))
     return cards
 
 
@@ -224,7 +228,13 @@ def get_intel_gpus():
     """Structured Intel Arc stats via `intel_gpu_top` (intel-gpu-tools) —
     engine utilization and power only. This tool does not report VRAM
     usage at all, unlike nvidia-smi; if VRAM numbers are ever needed here,
-    that's a separate xpu-smi-based path, not an extension of this one."""
+    that's a separate xpu-smi-based path, not an extension of this one.
+
+    Needs CAP_PERFMON (Docker drops it by default, even running as root)
+    since intel_gpu_top reads GPU counters via perf_event_open() — see
+    backend-bridge's compose cap_add. Without it this returns [] cleanly
+    rather than raising, since 'no telemetry' is a normal degraded state,
+    not a bug."""
     if not shutil.which("intel_gpu_top"):
         return []
 
