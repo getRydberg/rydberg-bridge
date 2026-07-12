@@ -27,9 +27,9 @@ type BridgeResources = {
     slot: string;
     name: string;
     util: number;
-    vram_used_gb: number;
-    vram_total_gb: number;
-    temp_c: number;
+    vram_used_gb: number | null;
+    vram_total_gb: number | null;
+    temp_c: number | null;
   }[];
 };
 type BridgeStatus = {
@@ -799,8 +799,10 @@ function ResourcesSection({ resources }: { resources: BridgeResources | undefine
       {/* GPUs */}
       <div className="grid grid-cols-2 gap-2">
         {gpus.map((gpu) => {
-          const vramPct = (gpu.vramUsed / gpu.vramTotal) * 100;
-          const tempWarn = gpu.temp > 75;
+          const hasVram = gpu.vram_used_gb != null && gpu.vram_total_gb != null;
+          const hasTemp = gpu.temp_c != null;
+          const vramPct = hasVram ? (gpu.vram_used_gb! / Math.max(gpu.vram_total_gb!, 0.1)) * 100 : 0;
+
           return (
             <div
               key={gpu.slot}
@@ -839,11 +841,17 @@ function ResourcesSection({ resources }: { resources: BridgeResources | undefine
                     VRAM
                   </span>
                   <span className="font-mono text-xs" style={{ color: "#d8e4f0" }}>
-                    {gpu.vram_used_gb.toFixed(1)}
-                    <span style={{ color: "#4e6278" }}>/{gpu.vram_total_gb.toFixed(1)}G</span>
+                    {hasVram ? (
+                      <>
+                        {gpu.vram_used_gb!.toFixed(1)}
+                        <span style={{ color: "#4e6278" }}>/{gpu.vram_total_gb!.toFixed(1)}G</span>
+                      </>
+                    ) : (
+                      <span style={{ color: "#4e6278" }}>N/A</span>
+                    )}
                   </span>
                 </div>
-                <ResourceBar pct={(gpu.vram_used_gb / Math.max(gpu.vram_total_gb, 0.1)) * 100} />
+                <ResourceBar pct={vramPct} />
               </div>
 
               {/* Temp */}
@@ -856,9 +864,9 @@ function ResourcesSection({ resources }: { resources: BridgeResources | undefine
                 </div>
                 <span
                   className="font-mono text-sm font-semibold tabular-nums"
-                  style={{ color: gpu.temp_c > 75 ? "#f5a623" : "#d8e4f0" }}
+                  style={{ color: hasTemp && gpu.temp_c! > 75 ? "#f5a623" : "#d8e4f0" }}
                 >
-                  {Math.round(gpu.temp_c)}°C
+                  {hasTemp ? `${Math.round(gpu.temp_c!)}°C` : "N/A"}
                 </span>
               </div>
             </div>
