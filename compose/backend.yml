@@ -16,10 +16,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Host resource stats — read-only.
       - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      # tmux/screen sockets live here — the `user:` field below must match
-      # your host UID exactly, or these sockets are unreadable (permission
-      # denied — fails silently as an empty session list, not an error).
+      # tmux/screen sockets live here. Runs as root (no USER in the
+      # Dockerfile), which is what lets this read host tmux/screen sockets
+      # regardless of their on-host ownership — no UID-matching needed.
       - /tmp:/tmp
       - /run/screen:/run/screen:ro
       # So Bridge can read modules.list from the core repo.
@@ -37,7 +36,13 @@ services:
     environment:
       RYDBERG_ROOT: /rydberg-root
       HOST_PROC: /host/proc
-      HOST_SYS: /host/sys
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bridge-be.rule=Host(`bridge.rydberg.app`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.bridge-be.entrypoints=web"
+      - "traefik.http.routers.bridge-be.priority=10"
+      - "traefik.http.services.bridge-be.loadbalancer.server.port=8080"
 
     networks:
       - rydberg-net

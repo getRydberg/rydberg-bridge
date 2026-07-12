@@ -7,25 +7,17 @@ services:
     restart: unless-stopped
     profiles:
       - bridge
-    ports:
-      - "${FRONTEND_PORT:-5173}:5173"
     volumes:
       - ../frontend:/app
       - /app/node_modules
     environment:
-      # Read by the BROWSER (fetch calls), so this can never be a container
-      # name — container names only resolve between containers on
-      # rydberg-net, not from your Mac/phone's browser.
-      #
-      # Production (behind Cloudflare Tunnel path-routing): use a relative
-      # path, e.g. VITE_API_BASE_URL=/api — same origin as the frontend,
-      # no hostname needed at all.
-      #
-      # Local dev without Cloudflare: only works if you've ALSO added a
-      # host port mapping to backend-bridge (e.g. ports: ["8081:8080"]),
-      # then point this at http://localhost:8081 to match.
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
       CHOKIDAR_USEPOLLING: "true"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bridge-fe.rule=Host(`bridge.rydberg.app`)"
+      - "traefik.http.routers.bridge-fe.entrypoints=web"
+      - "traefik.http.services.bridge-fe.loadbalancer.server.port=5173"
     depends_on:
       - backend-bridge
     networks:
