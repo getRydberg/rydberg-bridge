@@ -4,7 +4,7 @@ and pane capture for either."""
 import shutil
 from pathlib import Path
 
-from .utils import run
+from .utils import run, run_checked
 
 
 def get_sessions():
@@ -54,7 +54,12 @@ def get_screen_capture(session_name: str, kind: str = "tmux"):
         return run(["tmux", "capture-pane", "-t", session_name, "-p"], timeout=5)
     elif kind == "screen":
         tmp = f"/tmp/rydberg_bridge_capture_{session_name}.txt"
-        run(["screen", "-S", session_name, "-X", "hardcopy", tmp])
+        result = run_checked(["screen", "-S", session_name, "-X", "hardcopy", tmp], timeout=5)
+        if result is None:
+            return "ERROR: screen command timed out or failed to launch"
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            return f"ERROR: screen hardcopy failed (exit {result.returncode}): {detail}"
         try:
             return Path(tmp).read_text()
         except Exception as e:

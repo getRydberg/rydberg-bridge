@@ -9,8 +9,7 @@ the root README.md for why that's a documented exception, not a mistake.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from core.docker_client import get_all_containers
-from core.modules import get_rydberg_modules
+from core.modules import get_rydberg_modules, get_unassigned_containers
 from core.resources import get_resources
 from core.sessions import get_sessions, get_screen_capture
 
@@ -27,7 +26,7 @@ app.add_middleware(
 def status():
     return {
         "modules": get_rydberg_modules(),
-        "containers": get_all_containers(),
+        "containers": get_unassigned_containers(),
         "sessions": get_sessions(),
         "resources": get_resources(),
     }

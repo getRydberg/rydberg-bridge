@@ -1,6 +1,7 @@
 """Host resource stats: load, memory, disk, CPU-per-core, and GPU (both
 Intel xpu-smi and NVIDIA nvidia-smi paths, whichever's present)."""
 
+import json
 import shutil
 import time
 from pathlib import Path
@@ -36,16 +37,9 @@ def get_resources():
     # also bind-mount specific host paths (e.g. /data, /home2) — see README.
     resources["disk_raw"] = run(["df", "-h"]).strip()
 
-    if shutil.which("xpu-smi"):
-        gpu_out = run(["xpu-smi", "stats", "-d", "0"], timeout=8)
-        gpu_out += "\n" + run(["xpu-smi", "stats", "-d", "1"], timeout=8)
-        resources["gpu_raw"] = gpu_out.strip()
-    else:
-        resources["gpu_raw"] = "xpu-smi not found on PATH"
-
     resources["cpu"] = get_cpu_usage()
     resources["disks"] = get_disk_usage()
-    resources["gpus"] = get_nvidia_gpus()
+    resources["gpus"] = get_nvidia_gpus() + get_intel_gpus()
 
     return resources
 
@@ -176,6 +170,91 @@ def get_nvidia_gpus():
                 "vram_used_gb": round(mem_used_mb / 1024, 1),
                 "vram_total_gb": round(mem_total_mb / 1024, 1),
                 "temp_c": round(temp_c, 1),
+            }
+        )
+
+    return gpus
+
+
+def _list_intel_cards():
+    """Discover DRM card selectors via `intel_gpu_top -L`, so each GPU gets
+    queried individually instead of only ever seeing the first one.
+    Format varies a bit by intel-gpu-tools version — this parses
+    defensively and just returns [] if nothing recognizable comes back,
+    in which case get_intel_gpus() falls back to a single default query."""
+    out = run(["intel_gpu_top", "-L"], timeout=5)
+    if out.startswith("ERROR"):
+        return []
+
+    cards = []
+    for line in out.strip().splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].lower().startswith("card"):
+            cards.append(parts[1])
+    return cards
+
+
+def _parse_intel_gpu_top_json(raw: str):
+    """intel_gpu_top -J streams one JSON object per sample rather than a
+    single valid document, so grab the first complete {...} via brace
+    matching instead of a plain json.loads. Field names have shifted a
+    bit across intel-gpu-tools versions, so every lookup here is
+    defensive — a missing key becomes None rather than a crash."""
+    if raw.startswith("ERROR") or not raw.strip():
+        return None
+
+    depth = 0
+    start = None
+    for i, ch in enumerate(raw):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
+                try:
+                    return json.loads(raw[start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
+def get_intel_gpus():
+    """Structured Intel Arc stats via `intel_gpu_top` (intel-gpu-tools) —
+    engine utilization and power only. This tool does not report VRAM
+    usage at all, unlike nvidia-smi; if VRAM numbers are ever needed here,
+    that's a separate xpu-smi-based path, not an extension of this one."""
+    if not shutil.which("intel_gpu_top"):
+        return []
+
+    cards = _list_intel_cards() or [None]  # None = let the tool pick a default
+    gpus = []
+    for idx, card in enumerate(cards):
+        cmd = ["timeout", "2", "intel_gpu_top", "-J", "-s", "1000"]
+        if card:
+            cmd += ["-d", card]
+        raw = run(cmd, timeout=5)
+        obj = _parse_intel_gpu_top_json(raw)
+        if obj is None:
+            continue
+
+        engines = obj.get("engines", {}) or {}
+        busy_vals = [v.get("busy") for v in engines.values() if isinstance(v, dict) and "busy" in v]
+        util = round(sum(busy_vals) / len(busy_vals), 1) if busy_vals else None
+
+        power = obj.get("power", {}) or {}
+        power_w = power.get("GPU") if isinstance(power, dict) else None
+
+        gpus.append(
+            {
+                "slot": f"GPU {idx}",
+                "name": "Intel Arc",
+                "util": util,
+                "power_w": power_w,
+                "vram_used_gb": None,
+                "vram_total_gb": None,
+                "temp_c": None,
             }
         )
 
